@@ -1,0 +1,633 @@
+name: Build R34Vault iOS IPA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/build-r34vault-ios.yml"
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-15
+
+    steps:
+      - name: Verify Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-path
+
+      - name: Create iOS project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p R34VaultiOS.xcodeproj
+          mkdir -p R34VaultiOS
+
+          cat > R34VaultiOS/Info.plist <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleDevelopmentRegion</key>
+              <string>$(DEVELOPMENT_LANGUAGE)</string>
+              <key>CFBundleExecutable</key>
+              <string>$(EXECUTABLE_NAME)</string>
+              <key>CFBundleIdentifier</key>
+              <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+              <key>CFBundleInfoDictionaryVersion</key>
+              <string>6.0</string>
+              <key>CFBundleName</key>
+              <string>R34 Vault</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>$(MARKETING_VERSION)</string>
+              <key>CFBundleVersion</key>
+              <string>$(CURRENT_PROJECT_VERSION)</string>
+              <key>LSRequiresIPhoneOS</key>
+              <true/>
+              <key>NSAppTransportSecurity</key>
+              <dict>
+                  <key>NSAllowsArbitraryLoadsInWebContent</key>
+                  <true/>
+              </dict>
+              <key>UILaunchScreen</key>
+              <dict/>
+              <key>UIRequiresFullScreen</key>
+              <false/>
+              <key>UISupportedInterfaceOrientations</key>
+              <array>
+                  <string>UIInterfaceOrientationPortrait</string>
+                  <string>UIInterfaceOrientationLandscapeLeft</string>
+                  <string>UIInterfaceOrientationLandscapeRight</string>
+              </array>
+              <key>UISupportedInterfaceOrientations~ipad</key>
+              <array>
+                  <string>UIInterfaceOrientationPortrait</string>
+                  <string>UIInterfaceOrientationPortraitUpsideDown</string>
+                  <string>UIInterfaceOrientationLandscapeLeft</string>
+                  <string>UIInterfaceOrientationLandscapeRight</string>
+              </array>
+          </dict>
+          </plist>
+          EOF
+
+          cat > R34VaultiOS/Main.swift <<'EOF'
+          import UIKit
+          import WebKit
+
+          @main
+          final class AppDelegate: UIResponder, UIApplicationDelegate {
+              var window: UIWindow?
+
+              func application(
+                  _ application: UIApplication,
+                  didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+              ) -> Bool {
+                  let window = UIWindow(frame: UIScreen.main.bounds)
+                  window.rootViewController = BrowserViewController()
+                  window.makeKeyAndVisible()
+                  self.window = window
+                  return true
+              }
+          }
+
+          final class BrowserViewController: UIViewController, WKNavigationDelegate, WKUIDelegate {
+              private let homeURL = URL(string: "https://rule34vault.xxx/")!
+              private var webView: WKWebView!
+              private var progressView: UIProgressView!
+              private var progressObservation: NSKeyValueObservation?
+              private var backButton: UIButton!
+
+              override func viewDidLoad() {
+                  super.viewDidLoad()
+                  view.backgroundColor = .black
+
+                  let configuration = WKWebViewConfiguration()
+                  configuration.websiteDataStore = .default()
+                  configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
+                  configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+                  configuration.allowsInlineMediaPlayback = true
+                  configuration.mediaTypesRequiringUserActionForPlayback = []
+                  configuration.applicationNameForUserAgent = "R34VaultiOS/1.0"
+
+                  webView = WKWebView(frame: .zero, configuration: configuration)
+                  webView.translatesAutoresizingMaskIntoConstraints = false
+                  webView.navigationDelegate = self
+                  webView.uiDelegate = self
+                  webView.allowsBackForwardNavigationGestures = true
+                  webView.scrollView.contentInsetAdjustmentBehavior = .automatic
+                  view.addSubview(webView)
+
+                  progressView = UIProgressView(progressViewStyle: .bar)
+                  progressView.translatesAutoresizingMaskIntoConstraints = false
+                  progressView.progressTintColor = .white
+                  progressView.trackTintColor = .clear
+                  view.addSubview(progressView)
+
+                  let toolbar = makeToolbar()
+                  view.addSubview(toolbar)
+
+                  NSLayoutConstraint.activate([
+                      webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                      webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                      webView.topAnchor.constraint(equalTo: view.topAnchor),
+                      webView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+                      progressView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                      progressView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                      progressView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+                      progressView.heightAnchor.constraint(equalToConstant: 2),
+
+                      toolbar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+                      toolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+                      toolbar.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
+                      toolbar.heightAnchor.constraint(equalToConstant: 52)
+                  ])
+
+                  progressObservation = webView.observe(\.estimatedProgress, options: [.new]) { [weak self] webView, _ in
+                      guard let self else { return }
+                      let value = Float(webView.estimatedProgress)
+                      self.progressView.setProgress(value, animated: true)
+                      self.progressView.isHidden = value >= 1.0
+                  }
+
+                  webView.load(URLRequest(url: homeURL))
+              }
+
+              deinit {
+                  progressObservation?.invalidate()
+              }
+
+              private func makeToolbar() -> UIVisualEffectView {
+                  let blur = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterialDark))
+                  blur.translatesAutoresizingMaskIntoConstraints = false
+                  blur.layer.cornerRadius = 18
+                  blur.clipsToBounds = true
+
+                  let stack = UIStackView()
+                  stack.translatesAutoresizingMaskIntoConstraints = false
+                  stack.axis = .horizontal
+                  stack.alignment = .fill
+                  stack.distribution = .fillEqually
+                  stack.spacing = 6
+                  blur.contentView.addSubview(stack)
+
+                  backButton = makeButton(title: "Back", action: #selector(goBack))
+                  let home = makeButton(title: "Home", action: #selector(goHome))
+                  let search = makeButton(title: "Search", action: #selector(focusSearch))
+                  let profile = makeButton(title: "Profile", action: #selector(toggleProfile))
+
+                  stack.addArrangedSubview(backButton)
+                  stack.addArrangedSubview(home)
+                  stack.addArrangedSubview(search)
+                  stack.addArrangedSubview(profile)
+
+                  NSLayoutConstraint.activate([
+                      stack.leadingAnchor.constraint(equalTo: blur.contentView.leadingAnchor, constant: 6),
+                      stack.trailingAnchor.constraint(equalTo: blur.contentView.trailingAnchor, constant: -6),
+                      stack.topAnchor.constraint(equalTo: blur.contentView.topAnchor, constant: 4),
+                      stack.bottomAnchor.constraint(equalTo: blur.contentView.bottomAnchor, constant: -4)
+                  ])
+
+                  return blur
+              }
+
+              private func makeButton(title: String, action: Selector) -> UIButton {
+                  let button = UIButton(type: .system)
+                  button.setTitle(title, for: .normal)
+                  button.setTitleColor(.white, for: .normal)
+                  button.titleLabel?.font = .systemFont(ofSize: 12, weight: .semibold)
+                  button.backgroundColor = UIColor.white.withAlphaComponent(0.08)
+                  button.layer.cornerRadius = 11
+                  button.clipsToBounds = true
+                  button.addTarget(self, action: action, for: .touchUpInside)
+                  return button
+              }
+
+              @objc private func goBack() {
+                  if webView.canGoBack {
+                      webView.goBack()
+                  }
+              }
+
+              @objc private func goHome() {
+                  webView.load(URLRequest(url: homeURL))
+              }
+
+              @objc private func focusSearch() {
+                  webView.becomeFirstResponder()
+                  let script = #"""
+                  (() => {
+                    const fields = [...document.querySelectorAll('input,textarea')];
+                    const field = fields.find(el => {
+                      const text = [el.name, el.id, el.placeholder, el.getAttribute('aria-label')]
+                        .filter(Boolean).join(' ').toLowerCase();
+                      return text.includes('search') || text.includes('tag');
+                    });
+                    if (!field) return false;
+                    field.removeAttribute('maxlength');
+                    field.focus();
+                    field.click();
+                    field.scrollIntoView({behavior:'smooth', block:'center'});
+                    return true;
+                  })();
+                  """#
+                  webView.evaluateJavaScript(script)
+              }
+
+              @objc private func toggleProfile() {
+                  let script = #"""
+                  (() => {
+                    const existing = document.getElementById('r34ios-profile');
+                    if (existing) {
+                      existing.remove();
+                      return true;
+                    }
+
+                    const links = [...document.querySelectorAll('a[href]')];
+                    const pick = regex => links.find(link => regex.test(((link.textContent || '') + ' ' + link.href).toLowerCase()));
+
+                    const profile = pick(/profile|account|my.?page|user/);
+                    const playlists = pick(/playlist|collection|saved/);
+                    const images = pick(/liked.?image|image.?liked|favorite.?image|image.?favorite/);
+                    const videos = pick(/liked.?video|video.?liked|favorite.?video|video.?favorite/);
+
+                    const fallback = profile ? profile.href : location.origin;
+                    const p = playlists ? playlists.href : (localStorage.getItem('r34ios_playlists') || fallback);
+                    const i = images ? images.href : (localStorage.getItem('r34ios_images') || fallback);
+                    const v = videos ? videos.href : (localStorage.getItem('r34ios_videos') || fallback);
+
+                    if (playlists) localStorage.setItem('r34ios_playlists', playlists.href);
+                    if (images) localStorage.setItem('r34ios_images', images.href);
+                    if (videos) localStorage.setItem('r34ios_videos', videos.href);
+
+                    const panel = document.createElement('div');
+                    panel.id = 'r34ios-profile';
+                    panel.style.cssText = `
+                      position:fixed; z-index:2147483647;
+                      left:5%; right:5%; top:7%; bottom:12%;
+                      background:#09090d; color:#fff;
+                      border:1px solid #4a4a55; border-radius:22px;
+                      box-shadow:0 25px 80px rgba(0,0,0,.85);
+                      padding:28px; box-sizing:border-box;
+                      font-family:-apple-system,BlinkMacSystemFont,sans-serif;
+                      overflow:auto;
+                    `;
+                    const item = `display:block;color:#fff;background:#202028;padding:20px;margin:12px 0;border-radius:14px;text-decoration:none;font-size:20px;font-weight:650`;
+                    panel.innerHTML = `
+                      <div style="font-size:34px;font-weight:800;margin-bottom:4px">Profile</div>
+                      <div style="opacity:.55;font-size:15px;margin-bottom:22px">Your account library</div>
+                      <a href="${p}" style="${item}">Saved playlists</a>
+                      <a href="${i}" style="${item}">Liked images</a>
+                      <a href="${v}" style="${item}">Liked videos</a>
+                      <button id="r34ios-close" style="width:100%;margin-top:16px;padding:16px;border:0;border-radius:14px;background:#34343d;color:#fff;font-size:17px">Close</button>
+                    `;
+                    document.body.appendChild(panel);
+                    document.getElementById('r34ios-close')?.addEventListener('click', () => panel.remove());
+                    return true;
+                  })();
+                  """#
+                  webView.evaluateJavaScript(script)
+              }
+
+              private func injectEnhancements() {
+                  let script = #"""
+                  (() => {
+                    const enhance = () => {
+                      document.querySelectorAll('input,textarea').forEach(el => {
+                        const text = [el.name, el.id, el.placeholder, el.getAttribute('aria-label')]
+                          .filter(Boolean).join(' ').toLowerCase();
+                        if (text.includes('search') || text.includes('tag')) {
+                          el.removeAttribute('maxlength');
+                        }
+                      });
+                    };
+                    enhance();
+                    if (!window.__r34iosObserver) {
+                      window.__r34iosObserver = new MutationObserver(enhance);
+                      window.__r34iosObserver.observe(document.documentElement, {childList:true, subtree:true});
+                    }
+                  })();
+                  """#
+                  webView.evaluateJavaScript(script)
+              }
+
+              func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+                  injectEnhancements()
+                  backButton.isEnabled = webView.canGoBack
+              }
+
+              func webView(
+                  _ webView: WKWebView,
+                  decidePolicyFor navigationAction: WKNavigationAction,
+                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+              ) {
+                  guard let url = navigationAction.request.url else {
+                      decisionHandler(.allow)
+                      return
+                  }
+
+                  let scheme = url.scheme?.lowercased() ?? ""
+                  if scheme == "http" || scheme == "https" || scheme == "about" {
+                      if navigationAction.targetFrame == nil {
+                          webView.load(navigationAction.request)
+                          decisionHandler(.cancel)
+                      } else {
+                          decisionHandler(.allow)
+                      }
+                      return
+                  }
+
+                  if UIApplication.shared.canOpenURL(url) {
+                      UIApplication.shared.open(url)
+                  }
+                  decisionHandler(.cancel)
+              }
+
+              func webView(
+                  _ webView: WKWebView,
+                  createWebViewWith configuration: WKWebViewConfiguration,
+                  for navigationAction: WKNavigationAction,
+                  windowFeatures: WKWindowFeatures
+              ) -> WKWebView? {
+                  if let url = navigationAction.request.url {
+                      webView.load(URLRequest(url: url))
+                  }
+                  return nil
+              }
+          }
+          EOF
+
+          cat > R34VaultiOS.xcodeproj/project.pbxproj <<'EOF'
+          // !$*UTF8*$!
+          {
+              archiveVersion = 1;
+              classes = {
+              };
+              objectVersion = 77;
+              objects = {
+
+          /* Begin PBXBuildFile section */
+                  A10000000000000000000001 /* Main.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* Main.swift */; };
+          /* End PBXBuildFile section */
+
+          /* Begin PBXFileReference section */
+                  A20000000000000000000001 /* Main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Main.swift; sourceTree = "<group>"; };
+                  A20000000000000000000002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+                  A20000000000000000000003 /* R34VaultiOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = R34VaultiOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+          /* End PBXFileReference section */
+
+          /* Begin PBXFrameworksBuildPhase section */
+                  A30000000000000000000001 /* Frameworks */ = {
+                      isa = PBXFrameworksBuildPhase;
+                      buildActionMask = 2147483647;
+                      files = (
+                      );
+                      runOnlyForDeploymentPostprocessing = 0;
+                  };
+          /* End PBXFrameworksBuildPhase section */
+
+          /* Begin PBXGroup section */
+                  A40000000000000000000001 = {
+                      isa = PBXGroup;
+                      children = (
+                          A40000000000000000000002 /* R34VaultiOS */,
+                          A40000000000000000000003 /* Products */,
+                      );
+                      sourceTree = "<group>";
+                  };
+                  A40000000000000000000002 /* R34VaultiOS */ = {
+                      isa = PBXGroup;
+                      children = (
+                          A20000000000000000000001 /* Main.swift */,
+                          A20000000000000000000002 /* Info.plist */,
+                      );
+                      path = R34VaultiOS;
+                      sourceTree = "<group>";
+                  };
+                  A40000000000000000000003 /* Products */ = {
+                      isa = PBXGroup;
+                      children = (
+                          A20000000000000000000003 /* R34VaultiOS.app */,
+                      );
+                      name = Products;
+                      sourceTree = "<group>";
+                  };
+          /* End PBXGroup section */
+
+          /* Begin PBXNativeTarget section */
+                  A50000000000000000000001 /* R34VaultiOS */ = {
+                      isa = PBXNativeTarget;
+                      buildConfigurationList = A90000000000000000000002 /* Build configuration list for PBXNativeTarget "R34VaultiOS" */;
+                      buildPhases = (
+                          A70000000000000000000001 /* Sources */,
+                          A30000000000000000000001 /* Frameworks */,
+                          A60000000000000000000001 /* Resources */,
+                      );
+                      buildRules = (
+                      );
+                      dependencies = (
+                      );
+                      name = R34VaultiOS;
+                      productName = R34VaultiOS;
+                      productReference = A20000000000000000000003 /* R34VaultiOS.app */;
+                      productType = "com.apple.product-type.application";
+                  };
+          /* End PBXNativeTarget section */
+
+          /* Begin PBXProject section */
+                  A80000000000000000000001 /* Project object */ = {
+                      isa = PBXProject;
+                      attributes = {
+                          BuildIndependentTargetsInParallel = 1;
+                          LastSwiftUpdateCheck = 1640;
+                          LastUpgradeCheck = 1640;
+                          TargetAttributes = {
+                              A50000000000000000000001 = {
+                                  CreatedOnToolsVersion = 16.4;
+                              };
+                          };
+                      };
+                      buildConfigurationList = A90000000000000000000001 /* Build configuration list for PBXProject "R34VaultiOS" */;
+                      compatibilityVersion = "Xcode 16.0";
+                      developmentRegion = en;
+                      hasScannedForEncodings = 0;
+                      knownRegions = (
+                          en,
+                          Base,
+                      );
+                      mainGroup = A40000000000000000000001;
+                      productRefGroup = A40000000000000000000003 /* Products */;
+                      projectDirPath = "";
+                      projectRoot = "";
+                      targets = (
+                          A50000000000000000000001 /* R34VaultiOS */,
+                      );
+                  };
+          /* End PBXProject section */
+
+          /* Begin PBXResourcesBuildPhase section */
+                  A60000000000000000000001 /* Resources */ = {
+                      isa = PBXResourcesBuildPhase;
+                      buildActionMask = 2147483647;
+                      files = (
+                      );
+                      runOnlyForDeploymentPostprocessing = 0;
+                  };
+          /* End PBXResourcesBuildPhase section */
+
+          /* Begin PBXSourcesBuildPhase section */
+                  A70000000000000000000001 /* Sources */ = {
+                      isa = PBXSourcesBuildPhase;
+                      buildActionMask = 2147483647;
+                      files = (
+                          A10000000000000000000001 /* Main.swift in Sources */,
+                      );
+                      runOnlyForDeploymentPostprocessing = 0;
+                  };
+          /* End PBXSourcesBuildPhase section */
+
+          /* Begin XCBuildConfiguration section */
+                  B10000000000000000000001 /* Debug */ = {
+                      isa = XCBuildConfiguration;
+                      buildSettings = {
+                          CLANG_ENABLE_MODULES = YES;
+                          SWIFT_VERSION = 5.0;
+                      };
+                      name = Debug;
+                  };
+                  B10000000000000000000002 /* Release */ = {
+                      isa = XCBuildConfiguration;
+                      buildSettings = {
+                          CLANG_ENABLE_MODULES = YES;
+                          SWIFT_VERSION = 5.0;
+                      };
+                      name = Release;
+                  };
+                  B20000000000000000000001 /* Debug */ = {
+                      isa = XCBuildConfiguration;
+                      buildSettings = {
+                          CODE_SIGN_STYLE = Automatic;
+                          CURRENT_PROJECT_VERSION = 1;
+                          GENERATE_INFOPLIST_FILE = NO;
+                          INFOPLIST_FILE = R34VaultiOS/Info.plist;
+                          IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+                          LD_RUNPATH_SEARCH_PATHS = (
+                              "$(inherited)",
+                              "@executable_path/Frameworks",
+                          );
+                          MARKETING_VERSION = 1.0.0;
+                          PRODUCT_BUNDLE_IDENTIFIER = com.trailways.r34vault.ios;
+                          PRODUCT_NAME = "$(TARGET_NAME)";
+                          SDKROOT = iphoneos;
+                          SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+                          SUPPORTS_MACCATALYST = NO;
+                          SWIFT_EMIT_LOC_STRINGS = YES;
+                          SWIFT_VERSION = 5.0;
+                          TARGETED_DEVICE_FAMILY = "1,2";
+                      };
+                      name = Debug;
+                  };
+                  B20000000000000000000002 /* Release */ = {
+                      isa = XCBuildConfiguration;
+                      buildSettings = {
+                          CODE_SIGN_STYLE = Automatic;
+                          CURRENT_PROJECT_VERSION = 1;
+                          GENERATE_INFOPLIST_FILE = NO;
+                          INFOPLIST_FILE = R34VaultiOS/Info.plist;
+                          IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+                          LD_RUNPATH_SEARCH_PATHS = (
+                              "$(inherited)",
+                              "@executable_path/Frameworks",
+                          );
+                          MARKETING_VERSION = 1.0.0;
+                          PRODUCT_BUNDLE_IDENTIFIER = com.trailways.r34vault.ios;
+                          PRODUCT_NAME = "$(TARGET_NAME)";
+                          SDKROOT = iphoneos;
+                          SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+                          SUPPORTS_MACCATALYST = NO;
+                          SWIFT_EMIT_LOC_STRINGS = YES;
+                          SWIFT_OPTIMIZATION_LEVEL = "-O";
+                          SWIFT_VERSION = 5.0;
+                          TARGETED_DEVICE_FAMILY = "1,2";
+                      };
+                      name = Release;
+                  };
+          /* End XCBuildConfiguration section */
+
+          /* Begin XCConfigurationList section */
+                  A90000000000000000000001 /* Build configuration list for PBXProject "R34VaultiOS" */ = {
+                      isa = XCConfigurationList;
+                      buildConfigurations = (
+                          B10000000000000000000001 /* Debug */,
+                          B10000000000000000000002 /* Release */,
+                      );
+                      defaultConfigurationIsVisible = 0;
+                      defaultConfigurationName = Release;
+                  };
+                  A90000000000000000000002 /* Build configuration list for PBXNativeTarget "R34VaultiOS" */ = {
+                      isa = XCConfigurationList;
+                      buildConfigurations = (
+                          B20000000000000000000001 /* Debug */,
+                          B20000000000000000000002 /* Release */,
+                      );
+                      defaultConfigurationIsVisible = 0;
+                      defaultConfigurationName = Release;
+                  };
+          /* End XCConfigurationList section */
+              };
+              rootObject = A80000000000000000000001 /* Project object */;
+          }
+          EOF
+
+          plutil -lint R34VaultiOS/Info.plist
+          xcodebuild -project R34VaultiOS.xcodeproj -list
+
+      - name: Build unsigned app
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD_DIR="$PWD/build/Release-iphoneos"
+          rm -rf "$PWD/build"
+
+          xcodebuild \
+            -project R34VaultiOS.xcodeproj \
+            -target R34VaultiOS \
+            -configuration Release \
+            -sdk iphoneos \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CONFIGURATION_BUILD_DIR="$BUILD_DIR" \
+            clean build
+
+          APP="$BUILD_DIR/R34VaultiOS.app"
+          test -d "$APP"
+          test -f "$APP/R34VaultiOS"
+          test -f "$APP/Info.plist"
+
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf Payload R34Vault-iOS-unsigned.ipa
+          mkdir Payload
+          cp -R build/Release-iphoneos/R34VaultiOS.app Payload/
+          /usr/bin/zip -qry R34Vault-iOS-unsigned.ipa Payload
+
+          unzip -l R34Vault-iOS-unsigned.ipa | grep "Payload/R34VaultiOS.app/R34VaultiOS"
+          ls -lh R34Vault-iOS-unsigned.ipa
+          shasum -a 256 R34Vault-iOS-unsigned.ipa
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: R34Vault-iOS-unsigned-IPA
+          path: R34Vault-iOS-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
