@@ -1,0 +1,1240 @@
+name: Build R34VaultTV APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
+    steps:
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Verify Android toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f "$ANDROID_HOME/platforms/android-35/android.jar"
+          test -d "$ANDROID_HOME/build-tools/35.0.0"
+
+          echo "Android SDK: $ANDROID_HOME"
+          echo "Android platform 35: OK"
+          echo "Android Build Tools 35.0.0: OK"
+
+          java -version
+          gradle --version
+
+      - name: Create Android TV project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p app/src/main/java/com/trailways/r34vaulttv
+          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/drawable
+
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+
+          rootProject.name = "R34VaultTV"
+          include ":app"
+          EOF
+
+          cat > build.gradle <<'EOF'
+          plugins {
+              id "com.android.application" version "8.7.3" apply false
+          }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          org.gradle.daemon=false
+          android.useAndroidX=true
+          EOF
+
+          printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
+
+          cat > app/build.gradle <<'EOF'
+          plugins {
+              id "com.android.application"
+          }
+
+          android {
+              namespace "com.trailways.r34vaulttv"
+              compileSdk 35
+              buildToolsVersion "35.0.0"
+
+              defaultConfig {
+                  applicationId "com.trailways.r34vaulttv"
+                  minSdk 23
+                  targetSdk 35
+                  versionCode 14
+                  versionName "1.4.0"
+              }
+
+              buildTypes {
+                  debug {
+                      debuggable true
+                  }
+              }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.INTERNET" />
+
+              <uses-feature
+                  android:name="android.software.leanback"
+                  android:required="true" />
+
+              <uses-feature
+                  android:name="android.hardware.touchscreen"
+                  android:required="false" />
+
+              <application
+                  android:allowBackup="true"
+                  android:banner="@drawable/tv_banner"
+                  android:hardwareAccelerated="true"
+                  android:icon="@drawable/ic_launcher"
+                  android:label="R34 Vault TV"
+                  android:theme="@style/AppTheme"
+                  android:usesCleartextTraffic="false">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize"
+                      android:exported="true"
+                      android:screenOrientation="landscape">
+
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                          <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+                      </intent-filter>
+
+                  </activity>
+
+              </application>
+
+          </manifest>
+          EOF
+
+          cat > app/src/main/res/values/styles.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style
+                  name="AppTheme"
+                  parent="android:style/Theme.Material.NoActionBar">
+
+                  <item name="android:windowFullscreen">true</item>
+                  <item name="android:windowBackground">#000000</item>
+                  <item name="android:navigationBarColor">#000000</item>
+                  <item name="android:colorAccent">#FFFFFF</item>
+              </style>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_launcher.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector
+              xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+
+              <path
+                  android:fillColor="#08090C"
+                  android:pathData="M0,0h108v108h-108z" />
+
+              <path
+                  android:fillColor="#FFFFFF"
+                  android:pathData="M20,26h68v14h-68zM20,47h50v14h-50zM20,68h62v14h-62z" />
+          </vector>
+          EOF
+
+          cat > app/src/main/res/drawable/tv_banner.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape
+              xmlns:android="http://schemas.android.com/apk/res/android"
+              android:shape="rectangle">
+
+              <size
+                  android:width="320dp"
+                  android:height="180dp" />
+
+              <solid android:color="#09090D" />
+          </shape>
+          EOF
+
+          cat > app/src/main/java/com/trailways/r34vaulttv/MainActivity.java <<'EOF'
+          package com.trailways.r34vaulttv;
+
+          import android.annotation.SuppressLint;
+          import android.app.Activity;
+          import android.content.ActivityNotFoundException;
+          import android.content.Intent;
+          import android.graphics.Color;
+          import android.net.Uri;
+          import android.os.Bundle;
+          import android.os.Message;
+          import android.view.Gravity;
+          import android.view.KeyEvent;
+          import android.view.View;
+          import android.view.Window;
+          import android.webkit.CookieManager;
+          import android.webkit.ValueCallback;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebResourceRequest;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import android.widget.Button;
+          import android.widget.FrameLayout;
+          import android.widget.LinearLayout;
+          import android.widget.ProgressBar;
+
+          public class MainActivity extends Activity {
+
+              private static final String HOME = "https://rule34vault.xxx/";
+              private static final int FILE_CHOOSER = 1001;
+
+              private FrameLayout root;
+              private FrameLayout fullscreen;
+
+              private WebView web;
+              private WebView popup;
+
+              private ProgressBar progress;
+
+              private View customView;
+              private WebChromeClient.CustomViewCallback customCallback;
+              private ValueCallback<Uri[]> fileCallback;
+
+              @Override
+              protected void onCreate(Bundle state) {
+                  super.onCreate(state);
+
+                  requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+                  immersive();
+
+                  root = new FrameLayout(this);
+                  root.setBackgroundColor(Color.BLACK);
+
+                  web = new WebView(this);
+                  configureWebView(web, false);
+
+                  root.addView(web, match());
+
+                  progress = new ProgressBar(
+                      this,
+                      null,
+                      android.R.attr.progressBarStyleHorizontal
+                  );
+
+                  progress.setMax(100);
+
+                  FrameLayout.LayoutParams progressParams =
+                      new FrameLayout.LayoutParams(
+                          FrameLayout.LayoutParams.MATCH_PARENT,
+                          dp(4)
+                      );
+
+                  progressParams.gravity = Gravity.TOP;
+
+                  root.addView(
+                      progress,
+                      progressParams
+                  );
+
+                  addToolbar();
+
+                  fullscreen = new FrameLayout(this);
+                  fullscreen.setBackgroundColor(Color.BLACK);
+                  fullscreen.setVisibility(View.GONE);
+
+                  root.addView(
+                      fullscreen,
+                      match()
+                  );
+
+                  setContentView(root);
+
+                  if (state == null) {
+                      web.loadUrl(HOME);
+                  } else {
+                      web.restoreState(state);
+                  }
+              }
+
+              private FrameLayout.LayoutParams match() {
+                  return new FrameLayout.LayoutParams(
+                      FrameLayout.LayoutParams.MATCH_PARENT,
+                      FrameLayout.LayoutParams.MATCH_PARENT
+                  );
+              }
+
+              private void immersive() {
+                  getWindow()
+                      .getDecorView()
+                      .setSystemUiVisibility(
+                          View.SYSTEM_UI_FLAG_FULLSCREEN
+                              | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                              | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                              | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                              | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                              | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                      );
+              }
+
+              private void addToolbar() {
+                  LinearLayout bar = new LinearLayout(this);
+
+                  bar.setOrientation(
+                      LinearLayout.HORIZONTAL
+                  );
+
+                  bar.setGravity(
+                      Gravity.CENTER_VERTICAL
+                  );
+
+                  bar.setPadding(
+                      dp(8),
+                      dp(6),
+                      dp(8),
+                      dp(6)
+                  );
+
+                  bar.setBackgroundColor(
+                      0xE6121217
+                  );
+
+                  Button home =
+                      createButton("HOME");
+
+                  Button search =
+                      createButton("SEARCH");
+
+                  Button profile =
+                      createButton("PROFILE");
+
+                  home.setOnClickListener(
+                      v -> web.loadUrl(HOME)
+                  );
+
+                  search.setOnClickListener(
+                      v -> focusSearch()
+                  );
+
+                  profile.setOnClickListener(
+                      v -> toggleProfile()
+                  );
+
+                  bar.addView(home);
+                  bar.addView(search);
+                  bar.addView(profile);
+
+                  FrameLayout.LayoutParams params =
+                      new FrameLayout.LayoutParams(
+                          FrameLayout.LayoutParams.WRAP_CONTENT,
+                          dp(54)
+                      );
+
+                  params.gravity =
+                      Gravity.TOP | Gravity.RIGHT;
+
+                  params.topMargin = dp(10);
+                  params.rightMargin = dp(16);
+
+                  root.addView(
+                      bar,
+                      params
+                  );
+              }
+
+              private Button createButton(String title) {
+                  Button button =
+                      new Button(this);
+
+                  button.setText(title);
+                  button.setTextColor(Color.WHITE);
+                  button.setTextSize(13);
+                  button.setAllCaps(false);
+                  button.setFocusable(true);
+                  button.setBackgroundColor(0xE625252C);
+
+                  button.setOnFocusChangeListener(
+                      (view, focused) -> {
+                          view.setBackgroundColor(
+                              focused
+                                  ? 0xFF5A5A66
+                                  : 0xE625252C
+                          );
+
+                          view.setScaleX(
+                              focused ? 1.06f : 1f
+                          );
+
+                          view.setScaleY(
+                              focused ? 1.06f : 1f
+                          );
+                      }
+                  );
+
+                  LinearLayout.LayoutParams params =
+                      new LinearLayout.LayoutParams(
+                          dp(110),
+                          dp(40)
+                      );
+
+                  params.setMargins(
+                      dp(4),
+                      0,
+                      dp(4),
+                      0
+                  );
+
+                  button.setLayoutParams(params);
+
+                  return button;
+              }
+
+              @SuppressLint("SetJavaScriptEnabled")
+              private void configureWebView(
+                  WebView target,
+                  boolean popupWindow
+              ) {
+                  WebSettings settings =
+                      target.getSettings();
+
+                  settings.setJavaScriptEnabled(true);
+                  settings.setDomStorageEnabled(true);
+                  settings.setDatabaseEnabled(true);
+                  settings.setMediaPlaybackRequiresUserGesture(false);
+
+                  settings.setLoadWithOverviewMode(true);
+                  settings.setUseWideViewPort(true);
+
+                  settings.setSupportZoom(true);
+                  settings.setBuiltInZoomControls(true);
+                  settings.setDisplayZoomControls(false);
+
+                  settings.setSupportMultipleWindows(true);
+                  settings.setJavaScriptCanOpenWindowsAutomatically(true);
+
+                  settings.setCacheMode(
+                      WebSettings.LOAD_DEFAULT
+                  );
+
+                  settings.setMixedContentMode(
+                      WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                  );
+
+                  String userAgent =
+                      settings.getUserAgentString();
+
+                  if (
+                      userAgent != null
+                      && !userAgent.contains("R34VaultTV/")
+                  ) {
+                      settings.setUserAgentString(
+                          userAgent
+                              + " R34VaultTV/1.4"
+                      );
+                  }
+
+                  CookieManager cookies =
+                      CookieManager.getInstance();
+
+                  cookies.setAcceptCookie(true);
+                  cookies.setAcceptThirdPartyCookies(
+                      target,
+                      true
+                  );
+
+                  target.setFocusable(true);
+                  target.setFocusableInTouchMode(true);
+
+                  target.setWebViewClient(
+                      new WebViewClient() {
+
+                          @Override
+                          public boolean shouldOverrideUrlLoading(
+                              WebView view,
+                              WebResourceRequest request
+                          ) {
+                              Uri url =
+                                  request.getUrl();
+
+                              String scheme =
+                                  url.getScheme();
+
+                              if (
+                                  "http".equalsIgnoreCase(scheme)
+                                  || "https".equalsIgnoreCase(scheme)
+                              ) {
+                                  return false;
+                              }
+
+                              try {
+                                  startActivity(
+                                      new Intent(
+                                          Intent.ACTION_VIEW,
+                                          url
+                                      )
+                                  );
+                              } catch (
+                                  ActivityNotFoundException ignored
+                              ) {
+                              }
+
+                              return true;
+                          }
+
+                          @Override
+                          public void onPageFinished(
+                              WebView view,
+                              String url
+                          ) {
+                              if (!popupWindow) {
+                                  injectTvSupport(view);
+                              }
+
+                              CookieManager
+                                  .getInstance()
+                                  .flush();
+                          }
+                      }
+                  );
+
+                  target.setWebChromeClient(
+                      new WebChromeClient() {
+
+                          @Override
+                          public void onProgressChanged(
+                              WebView view,
+                              int value
+                          ) {
+                              if (view != web) {
+                                  return;
+                              }
+
+                              progress.setProgress(value);
+
+                              progress.setVisibility(
+                                  value >= 100
+                                      ? View.GONE
+                                      : View.VISIBLE
+                              );
+                          }
+
+                          @Override
+                          public void onShowCustomView(
+                              View view,
+                              CustomViewCallback callback
+                          ) {
+                              if (customView != null) {
+                                  callback
+                                      .onCustomViewHidden();
+
+                                  return;
+                              }
+
+                              customView = view;
+                              customCallback = callback;
+
+                              fullscreen.removeAllViews();
+
+                              fullscreen.addView(
+                                  view,
+                                  match()
+                              );
+
+                              fullscreen.setVisibility(
+                                  View.VISIBLE
+                              );
+
+                              fullscreen.bringToFront();
+                          }
+
+                          @Override
+                          public void onHideCustomView() {
+                              closeFullscreen();
+                          }
+
+                          @Override
+                          public boolean onCreateWindow(
+                              WebView view,
+                              boolean dialog,
+                              boolean userGesture,
+                              Message resultMsg
+                          ) {
+                              closePopup();
+
+                              popup =
+                                  new WebView(
+                                      MainActivity.this
+                                  );
+
+                              configureWebView(
+                                  popup,
+                                  true
+                              );
+
+                              root.addView(
+                                  popup,
+                                  match()
+                              );
+
+                              popup.bringToFront();
+
+                              WebView.WebViewTransport transport =
+                                  (WebView.WebViewTransport)
+                                      resultMsg.obj;
+
+                              transport.setWebView(popup);
+                              resultMsg.sendToTarget();
+
+                              return true;
+                          }
+
+                          @Override
+                          public void onCloseWindow(
+                              WebView window
+                          ) {
+                              if (window == popup) {
+                                  closePopup();
+                              }
+                          }
+
+                          @Override
+                          public boolean onShowFileChooser(
+                              WebView view,
+                              ValueCallback<Uri[]> callback,
+                              FileChooserParams params
+                          ) {
+                              if (fileCallback != null) {
+                                  fileCallback
+                                      .onReceiveValue(null);
+                              }
+
+                              fileCallback = callback;
+
+                              try {
+                                  startActivityForResult(
+                                      params.createIntent(),
+                                      FILE_CHOOSER
+                                  );
+
+                                  return true;
+                              } catch (
+                                  ActivityNotFoundException ignored
+                              ) {
+                                  fileCallback = null;
+
+                                  return false;
+                              }
+                          }
+                      }
+                  );
+              }
+
+              private void injectTvSupport(WebView target) {
+                  target.evaluateJavascript(
+                      """
+                      (() => {
+                        if (!document.getElementById('r34tv-style')) {
+                          const style = document.createElement('style');
+                          style.id = 'r34tv-style';
+                          style.textContent = `
+                            a:focus,
+                            button:focus,
+                            input:focus,
+                            select:focus,
+                            textarea:focus,
+                            video:focus,
+                            [role="button"]:focus,
+                            [tabindex]:focus {
+                              outline: 4px solid #fff !important;
+                              outline-offset: 4px !important;
+                              box-shadow: 0 0 0 3px #000 !important;
+                            }
+                          `;
+                          document.head.appendChild(style);
+                        }
+
+                        const enhance = () => {
+                          document
+                            .querySelectorAll(
+                              'a,button,input,select,textarea,video,[role="button"],[onclick]'
+                            )
+                            .forEach(el => {
+                              if (!el.hasAttribute('tabindex')) {
+                                el.tabIndex = 0;
+                              }
+                            });
+
+                          document
+                            .querySelectorAll('input,textarea')
+                            .forEach(el => {
+                              const data = (
+                                (el.name || '')
+                                + ' '
+                                + (el.id || '')
+                                + ' '
+                                + (el.placeholder || '')
+                                + ' '
+                                + (el.getAttribute('aria-label') || '')
+                              ).toLowerCase();
+
+                              if (
+                                data.includes('search')
+                                || data.includes('tag')
+                              ) {
+                                el.removeAttribute('maxlength');
+                              }
+                            });
+
+                          const links = [
+                            ...document.querySelectorAll('a[href]')
+                          ];
+
+                          const find = regex =>
+                            links.find(link =>
+                              regex.test(
+                                (
+                                  (link.textContent || '')
+                                  + ' '
+                                  + link.href
+                                ).toLowerCase()
+                              )
+                            );
+
+                          const account =
+                            find(/profile|account|user|my.?page/);
+
+                          const playlists =
+                            find(/playlist|collection|saved/);
+
+                          const images =
+                            find(/liked.?image|image.?liked|favorite.?image|image.?favorite/);
+
+                          const videos =
+                            find(/liked.?video|video.?liked|favorite.?video|video.?favorite/);
+
+                          if (account) {
+                            localStorage.setItem(
+                              'r34tv_account',
+                              account.href
+                            );
+                          }
+
+                          if (playlists) {
+                            localStorage.setItem(
+                              'r34tv_playlists',
+                              playlists.href
+                            );
+                          }
+
+                          if (images) {
+                            localStorage.setItem(
+                              'r34tv_images',
+                              images.href
+                            );
+                          }
+
+                          if (videos) {
+                            localStorage.setItem(
+                              'r34tv_videos',
+                              videos.href
+                            );
+                          }
+                        };
+
+                        enhance();
+
+                        if (!window.__r34tvObserver) {
+                          window.__r34tvObserver =
+                            new MutationObserver(enhance);
+
+                          window.__r34tvObserver.observe(
+                            document.documentElement,
+                            {
+                              childList: true,
+                              subtree: true
+                            }
+                          );
+                        }
+                      })();
+                      """,
+                      null
+                  );
+              }
+
+              private void focusSearch() {
+                  web.evaluateJavascript(
+                      """
+                      (() => {
+                        const field = [
+                          ...document.querySelectorAll(
+                            'input,textarea'
+                          )
+                        ].find(el => {
+                          const data = (
+                            (el.name || '')
+                            + ' '
+                            + (el.id || '')
+                            + ' '
+                            + (el.placeholder || '')
+                            + ' '
+                            + (el.getAttribute('aria-label') || '')
+                          ).toLowerCase();
+
+                          return (
+                            data.includes('search')
+                            || data.includes('tag')
+                          );
+                        });
+
+                        if (!field) {
+                          return false;
+                        }
+
+                        field.removeAttribute('maxlength');
+                        field.focus();
+
+                        field.scrollIntoView({
+                          behavior: 'smooth',
+                          block: 'center'
+                        });
+
+                        return true;
+                      })();
+                      """,
+                      null
+                  );
+              }
+
+              private void toggleProfile() {
+                  web.evaluateJavascript(
+                      """
+                      (() => {
+                        const old =
+                          document.getElementById(
+                            'r34tv-profile'
+                          );
+
+                        if (old) {
+                          old.remove();
+                          return;
+                        }
+
+                        const fallback =
+                          localStorage.getItem(
+                            'r34tv_account'
+                          )
+                          || location.origin;
+
+                        const playlists =
+                          localStorage.getItem(
+                            'r34tv_playlists'
+                          )
+                          || fallback;
+
+                        const images =
+                          localStorage.getItem(
+                            'r34tv_images'
+                          )
+                          || fallback;
+
+                        const videos =
+                          localStorage.getItem(
+                            'r34tv_videos'
+                          )
+                          || fallback;
+
+                        const itemStyle = `
+                          display:block;
+                          padding:24px;
+                          margin:14px 0;
+                          background:#202027;
+                          color:#fff;
+                          text-decoration:none;
+                          border-radius:14px;
+                          font-size:28px;
+                        `;
+
+                        const panel =
+                          document.createElement('div');
+
+                        panel.id =
+                          'r34tv-profile';
+
+                        panel.tabIndex = 0;
+
+                        panel.style.cssText = `
+                          position:fixed;
+                          left:8%;
+                          right:8%;
+                          top:8%;
+                          bottom:8%;
+                          z-index:2147483647;
+                          padding:40px;
+                          background:#0a0a0f;
+                          color:#fff;
+                          border:2px solid #444;
+                          border-radius:22px;
+                          box-sizing:border-box;
+                          font-family:sans-serif;
+                          overflow:auto;
+                        `;
+
+                        panel.innerHTML = `
+                          <h1>Profile</h1>
+
+                          <a
+                            tabindex="0"
+                            style="${itemStyle}"
+                            href="${playlists}">
+                            Saved playlists
+                          </a>
+
+                          <a
+                            tabindex="0"
+                            style="${itemStyle}"
+                            href="${images}">
+                            Liked images
+                          </a>
+
+                          <a
+                            tabindex="0"
+                            style="${itemStyle}"
+                            href="${videos}">
+                            Liked videos
+                          </a>
+                        `;
+
+                        document.body.appendChild(panel);
+
+                        panel
+                          .querySelector('a')
+                          ?.focus();
+                      })();
+                      """,
+                      null
+                  );
+              }
+
+              @Override
+              public boolean onKeyDown(
+                  int keyCode,
+                  KeyEvent event
+              ) {
+                  if (
+                      keyCode == KeyEvent.KEYCODE_SEARCH
+                      || keyCode == KeyEvent.KEYCODE_MENU
+                  ) {
+                      focusSearch();
+
+                      return true;
+                  }
+
+                  if (
+                      keyCode == KeyEvent.KEYCODE_INFO
+                      || keyCode == KeyEvent.KEYCODE_GUIDE
+                  ) {
+                      toggleProfile();
+
+                      return true;
+                  }
+
+                  if (
+                      keyCode == KeyEvent.KEYCODE_CHANNEL_UP
+                      || keyCode == KeyEvent.KEYCODE_PAGE_UP
+                  ) {
+                      web.evaluateJavascript(
+                          "window.scrollBy(0,-window.innerHeight*.85)",
+                          null
+                      );
+
+                      return true;
+                  }
+
+                  if (
+                      keyCode == KeyEvent.KEYCODE_CHANNEL_DOWN
+                      || keyCode == KeyEvent.KEYCODE_PAGE_DOWN
+                  ) {
+                      web.evaluateJavascript(
+                          "window.scrollBy(0,window.innerHeight*.85)",
+                          null
+                      );
+
+                      return true;
+                  }
+
+                  if (
+                      keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
+                  ) {
+                      web.evaluateJavascript(
+                          """
+                          (() => {
+                            const video =
+                              document.activeElement?.tagName === 'VIDEO'
+                                ? document.activeElement
+                                : document.querySelector('video');
+
+                            if (!video) {
+                              return false;
+                            }
+
+                            if (video.paused) {
+                              video.play();
+                            } else {
+                              video.pause();
+                            }
+
+                            return true;
+                          })();
+                          """,
+                          null
+                      );
+
+                      return true;
+                  }
+
+                  return super.onKeyDown(
+                      keyCode,
+                      event
+                  );
+              }
+
+              @Override
+              public void onBackPressed() {
+                  if (customView != null) {
+                      closeFullscreen();
+                      return;
+                  }
+
+                  if (popup != null) {
+                      closePopup();
+                      return;
+                  }
+
+                  web.evaluateJavascript(
+                      """
+                      document.getElementById(
+                        'r34tv-profile'
+                      ) !== null
+                      """,
+                      value -> {
+                          if ("true".equals(value)) {
+                              web.evaluateJavascript(
+                                  """
+                                  document
+                                    .getElementById(
+                                      'r34tv-profile'
+                                    )
+                                    ?.remove()
+                                  """,
+                                  null
+                              );
+                          } else if (web.canGoBack()) {
+                              web.goBack();
+                          } else {
+                              finish();
+                          }
+                      }
+                  );
+              }
+
+              private void closeFullscreen() {
+                  if (customView == null) {
+                      return;
+                  }
+
+                  fullscreen.removeAllViews();
+                  fullscreen.setVisibility(View.GONE);
+
+                  if (customCallback != null) {
+                      customCallback
+                          .onCustomViewHidden();
+                  }
+
+                  customView = null;
+                  customCallback = null;
+
+                  immersive();
+              }
+
+              private void closePopup() {
+                  if (popup == null) {
+                      return;
+                  }
+
+                  root.removeView(popup);
+                  popup.destroy();
+                  popup = null;
+
+                  web.requestFocus();
+              }
+
+              @Override
+              protected void onActivityResult(
+                  int requestCode,
+                  int resultCode,
+                  Intent data
+              ) {
+                  super.onActivityResult(
+                      requestCode,
+                      resultCode,
+                      data
+                  );
+
+                  if (
+                      requestCode == FILE_CHOOSER
+                      && fileCallback != null
+                  ) {
+                      fileCallback.onReceiveValue(
+                          WebChromeClient
+                              .FileChooserParams
+                              .parseResult(
+                                  resultCode,
+                                  data
+                              )
+                      );
+
+                      fileCallback = null;
+                  }
+              }
+
+              @Override
+              protected void onPause() {
+                  CookieManager
+                      .getInstance()
+                      .flush();
+
+                  if (web != null) {
+                      web.onPause();
+                  }
+
+                  super.onPause();
+              }
+
+              @Override
+              protected void onResume() {
+                  super.onResume();
+
+                  immersive();
+
+                  if (web != null) {
+                      web.onResume();
+                  }
+              }
+
+              @Override
+              protected void onSaveInstanceState(
+                  Bundle state
+              ) {
+                  if (web != null) {
+                      web.saveState(state);
+                  }
+
+                  super.onSaveInstanceState(state);
+              }
+
+              @Override
+              protected void onDestroy() {
+                  if (popup != null) {
+                      popup.destroy();
+                      popup = null;
+                  }
+
+                  if (web != null) {
+                      web.destroy();
+                      web = null;
+                  }
+
+                  super.onDestroy();
+              }
+
+              private int dp(int value) {
+                  return (int) (
+                      value
+                      * getResources()
+                          .getDisplayMetrics()
+                          .density
+                      + 0.5f
+                  );
+              }
+          }
+          EOF
+
+      - name: Build APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+
+          test -f "$APK"
+
+          echo "APK created:"
+          ls -lh "$APK"
+
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" \
+            dump badging "$APK" \
+            | head -n 20
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: R34VaultTV-v1.4.0-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
